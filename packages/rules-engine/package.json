@@ -1,24 +1,23 @@
 {
-  "name": "@varys/db",
+  "name": "@varys/rules-engine",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json && cp -r src/migrations dist/migrations",
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"(no unit tests)\"",
+    "test": "jest",
     "lint": "eslint src --max-warnings 0",
-    "migrate": "node dist/migrate.js",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@varys/config": "workspace:*",
-    "drizzle-orm": "^0.36.4",
-    "pg": "^8.13.1"
+    "@varys/contracts": "workspace:*"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.10",
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "typescript": "5.6.3"
   }
 }
