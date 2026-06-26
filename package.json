@@ -1,0 +1,26 @@
+{
+  "name": "varys",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-Powered Connector QA Platform — hybrid deterministic + RAG + LLM validation engine",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev",
+    "db:generate": "pnpm --filter @varys/db generate",
+    "db:migrate": "pnpm --filter @varys/db migrate",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "turbo": "^2.3.0",
+    "typescript": "5.6.3"
+  }
+}
