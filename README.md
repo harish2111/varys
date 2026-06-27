@@ -63,7 +63,10 @@ Built incrementally by phase:
 
 - **Phase 0 — Foundation**: monorepo, shared libs, DB + RLS, config, telemetry. ✅
 - **Phase 1 — Deterministic core**: gateway, AST extraction, deterministic engine,
-  aggregator, end-to-end deterministic run. 🚧
-- **Phase 2 — AI + scale**: ingestion, retrieval, governor, unit-worker, two-tier queues.
-- **Phase 3 — Runtime + hardening**: sandbox, RLS hardening, observability, auto-repair.
+  aggregator, end-to-end deterministic run. ✅ (see [docs/PHASE1.md](./docs/PHASE1.md))
+- **Phase 2 — AI + scale**: doc-ingestor, retrieval (RRF), llm-gateway governor,
+  unit-worker (RAG + LLM + back-verify), two-tier queue fan-out, AST-hash cache,
+  Helm + KEDA autoscaling. ✅ (see [docs/PHASE2.md](./docs/PHASE2.md))
+- **Phase 3 — Runtime + hardening**: sandbox, polling verification, observability,
+  auto-repair. 🚧
 - **Phase 4 — Frontend** (`varys-ui` repo).

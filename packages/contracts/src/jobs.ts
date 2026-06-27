@@ -24,6 +24,10 @@ export interface UnitJob {
   runId: string;
   orgId: string;
   namespace: string;
+  vendor: string;
+  apiVersion: string;
+  /** Persisted connector_elements id, for cache reuse and finding attribution. */
+  elementId?: string;
   /** App grouping key for weighted-fair dequeue (spec §4.1). */
   appGroup: string;
   unit: ExtractedUnit;
@@ -48,12 +52,21 @@ export interface AggregateJob {
   trace?: TraceContext;
 }
 
-/** Doc ingestion job. */
+/** Doc ingestion job (spec §8). Either an OpenAPI document, a GraphQL SDL, or a crawl root. */
 export interface IngestionJob {
   orgId: string;
   namespace: string;
   vendor: string;
   apiVersion: string;
-  rootUrl: string;
+  /** REST | GRAPHQL */
+  contractKind: 'REST' | 'GRAPHQL';
+  /** Inline OpenAPI document (parsed JSON) to ingest deterministically. */
+  openapi?: unknown;
+  /** Inline GraphQL SDL to ingest. */
+  graphqlSdl?: string;
+  /** Crawl root (Playwright path) when no inline document is supplied. */
+  rootUrl?: string;
+  /** Domains permitted for live runtime egress (feeds the Squid allowlist). */
+  allowedDomains?: string[];
   trace?: TraceContext;
 }

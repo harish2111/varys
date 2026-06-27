@@ -1,0 +1,76 @@
+# Per the spec §5 inventory: resources (req -> limit) and HPA ranges.
+image:
+  registry: REGION-docker.pkg.dev/PROJECT/varys
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Shared config (mounted from a ConfigMap) + secrets (External Secrets / Secret Manager).
+env:
+  NODE_ENV: production
+  LOG_LEVEL: info
+
+redis:
+  # KEDA scales workers on BullMQ queue depth via this Redis.
+  address: memorystore-redis:6379
+
+services:
+  qa-gateway:
+    type: http
+    port: 3000
+    replicas: { min: 2, max: 6 }
+    autoscale: { metric: cpu, targetCPU: 70 }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  llm-gateway:
+    type: http
+    port: 3001
+    replicas: { min: 2, max: 4 }
+    autoscale: { metric: cpu, targetCPU: 70 }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  qa-orchestrator:
+    type: worker
+    replicas: { min: 2, max: 6 }
+    autoscale: { metric: queue, queue: qa-app, lagThreshold: "5" }
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "2", memory: 2Gi }
+
+  qa-unit-worker:
+    type: worker
+    replicas: { min: 4, max: 20 }
+    autoscale: { metric: queue, queue: qa-unit, lagThreshold: "20" }
+    resources:
+      requests: { cpu: 500m, memory: 1Gi }
+      limits: { cpu: "1", memory: 1536Mi }
+
+  qa-sandbox-worker:
+    type: worker
+    replicas: { min: 2, max: 8 }
+    nodeSelector: { pool: sandbox }
+    tolerations:
+      - { key: sandbox, operator: Equal, value: "true", effect: NoSchedule }
+    autoscale: { metric: queue, queue: qa-runtime, lagThreshold: "5" }
+    resources:
+      requests: { cpu: 500m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  qa-aggregator:
+    type: worker
+    replicas: { min: 1, max: 4 }
+    autoscale: { metric: queue, queue: qa-aggregate, lagThreshold: "10" }
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+
+  doc-ingestor:
+    type: worker
+    replicas: { min: 1, max: 4 }
+    autoscale: { metric: queue, queue: qa-ingestion, lagThreshold: "2" }
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+      limits: { cpu: "2", memory: 4Gi }
