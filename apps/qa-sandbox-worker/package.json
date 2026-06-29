@@ -1,0 +1,43 @@
+{
+  "name": "@varys/qa-sandbox-worker",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "start": "node dist/main.js",
+    "test": "jest --passWithNoTests --forceExit",
+    "lint": "eslint src --max-warnings 0",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@varys/config": "workspace:*",
+    "@varys/contracts": "workspace:*",
+    "@varys/db": "workspace:*",
+    "@varys/llm-client": "workspace:*",
+    "@varys/queue": "workspace:*",
+    "@varys/rules-engine": "workspace:*",
+    "@varys/telemetry": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/core": "^0.3.0",
+    "ajv": "^8.17.1",
+    "drizzle-orm": "^0.36.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typescript": "5.6.3"
+  },
+  "optionalDependencies": {
+    "isolated-vm": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node-dev": "^2.0.0"
+  }
+}

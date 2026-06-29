@@ -4,6 +4,8 @@ import {
   GeminiTransport,
   LlmClient,
   type PricingTable,
+  type RuntimeFailureAnalysisRequest,
+  type RuntimeFailureAnalysisResponse,
   type ValidateUnitRequest,
   type ValidateUnitResponse,
   buildUnitValidationContents,
@@ -73,6 +75,25 @@ export class LlmService implements OnModuleInit {
     return { embedding: result.embedding };
   }
 
+  async analyzeFailure(req: RuntimeFailureAnalysisRequest): Promise<RuntimeFailureAnalysisResponse> {
+    const model = this.config.GEMINI_MODEL_FLASH;
+    const prompt = buildFailureAnalysisPrompt(req);
+    await this.governor.acquire('flash', estimateTokens(prompt));
+
+    const raw = await this.client.generateText(prompt, {
+      model,
+      responseSchema: FAILURE_ANALYSIS_SCHEMA,
+    });
+    await this.meter(req.orgId, req.runId, model, 'validation', raw.usage, raw.costUsd);
+
+    try {
+      const parsed = JSON.parse(raw.text) as RuntimeFailureAnalysisResponse;
+      return parsed;
+    } catch {
+      return { analysis: raw.text, isRetryable: false };
+    }
+  }
+
   private async meter(
     orgId: string,
     runId: string | undefined,
@@ -105,4 +126,30 @@ function modelClass(model: string): ModelClass {
   if (/pro/i.test(model)) return 'pro';
   if (/embedding/i.test(model)) return 'embed';
   return 'flash';
+}
+
+const FAILURE_ANALYSIS_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    analysis: { type: 'string' },
+    rootCause: { type: 'string' },
+    suggestedFix: { type: 'string' },
+    isRetryable: { type: 'boolean' },
+  },
+  required: ['analysis', 'isRetryable'],
+};
+
+function buildFailureAnalysisPrompt(req: RuntimeFailureAnalysisRequest): string {
+  return JSON.stringify({
+    instruction: [
+      'You are analyzing a runtime test failure for an iPaaS connector.',
+      'Given the element name, type, any runtime error, and the captured HTTP request,',
+      'diagnose the root cause and determine if regenerating the test payload would fix it.',
+      'Output strictly the JSON matching the provided schema.',
+    ].join(' '),
+    element: { name: req.elementName, type: req.elementType },
+    runtimeError: req.runtimeError ?? null,
+    capturedRequest: req.capturedRequest ?? null,
+    findingSummary: req.findingSummary ?? null,
+  });
 }

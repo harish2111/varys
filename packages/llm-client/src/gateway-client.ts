@@ -22,6 +22,23 @@ export interface EmbedResponseDto {
   embedding: number[];
 }
 
+export interface RuntimeFailureAnalysisRequest {
+  runId?: string;
+  orgId: string;
+  elementName: string;
+  elementType: 'ACTION' | 'TRIGGER';
+  runtimeError?: string;
+  capturedRequest?: unknown;
+  findingSummary?: string;
+}
+
+export interface RuntimeFailureAnalysisResponse {
+  analysis: string;
+  rootCause?: string;
+  suggestedFix?: string;
+  isRetryable: boolean;
+}
+
 /**
  * HTTP client used by workers to reach the llm-gateway — the sole Gemini conduit. Workers
  * never hold the Gemini key; the gateway governs rate, routes models, and meters cost.
@@ -38,6 +55,10 @@ export class LlmGatewayClient {
 
   async embed(text: string, runId?: string, orgId?: string): Promise<EmbedResponseDto> {
     return this.post<EmbedResponseDto>('/v1/llm/embed', { text, runId, orgId });
+  }
+
+  async analyzeFailure(req: RuntimeFailureAnalysisRequest): Promise<RuntimeFailureAnalysisResponse> {
+    return this.post<RuntimeFailureAnalysisResponse>('/v1/llm/analyze-failure', req);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {

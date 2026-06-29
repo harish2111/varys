@@ -16,6 +16,8 @@ export interface AppJob {
   deterministicOnly: boolean;
   runtime: boolean;
   live: boolean;
+  /** Vendor sandbox credentials, only present for live runtime (in-memory transit only). */
+  credentials?: Record<string, unknown>;
   trace?: TraceContext;
 }
 
@@ -39,8 +41,14 @@ export interface RuntimeJob {
   runId: string;
   orgId: string;
   namespace: string;
+  vendor: string;
+  apiVersion: string;
+  elementId?: string;
+  /** Full connector source, transpiled + executed in the isolate. */
+  source: string;
   unit: ExtractedUnit;
   live: boolean;
+  credentials?: Record<string, unknown>;
   trace?: TraceContext;
 }
 

@@ -4,12 +4,13 @@ import {
   type ExtractedUnit,
   RunPhase,
   RunStatus,
+  type RuntimeJob,
   type UnitFindings,
   type UnitJob,
 } from '@varys/contracts';
 import { connectorElements, getDb, validationFindings, validationRuns, withOrg } from '@varys/db';
 import { AuthPresenceRule, DeterministicEngine, PaginationHintRule, UnitHasOperationRule } from '@varys/rules-engine';
-import { enqueueUnitsFair, getAggregateQueue } from '@varys/queue';
+import { enqueueRuntimeJobs, enqueueUnitsFair, getAggregateQueue } from '@varys/queue';
 import { injectTrace } from '@varys/telemetry';
 import { eq } from 'drizzle-orm';
 import type { Database } from '@varys/db';
@@ -35,7 +36,7 @@ export class OrchestratorService {
     const extracted = extractConnector(job.source);
     const { vendor, apiVersion } = splitNamespace(job.namespace, extracted.version);
 
-    const survivors = await withOrg(job.orgId, async (tx) => {
+    const result = await withOrg(job.orgId, async (tx) => {
       const [run] = await tx.select().from(validationRuns).where(eq(validationRuns.id, job.runId)).limit(1);
       const connectorId = run?.connectorId ?? undefined;
 
@@ -48,6 +49,7 @@ export class OrchestratorService {
 
       let shortCircuited = 0;
       const survivorJobs: UnitJob[] = [];
+      const runtimeCandidates: RuntimeJob[] = [];
       for (const unit of extracted.units) {
         const result: UnitFindings = this.engine.evaluateUnit(extracted, unit, []);
         await this.writeFindings(tx, job, elementIdByKey.get(unit.key), result);
@@ -68,6 +70,21 @@ export class OrchestratorService {
             trace: injectTrace(),
           });
         }
+        if (job.runtime) {
+          runtimeCandidates.push({
+            runId: job.runId,
+            orgId: job.orgId,
+            namespace: job.namespace,
+            vendor,
+            apiVersion,
+            elementId: elementIdByKey.get(unit.key),
+            source: job.source,
+            unit,
+            live: job.live,
+            credentials: job.credentials,
+            trace: injectTrace(),
+          });
+        }
       }
 
       const completedNow = extracted.units.length - survivorJobs.length;
@@ -77,14 +94,16 @@ export class OrchestratorService {
           phase: survivorJobs.length > 0 ? RunPhase.RAG_RETRIEVAL : RunPhase.AGGREGATE,
           unitsShortCircuited: shortCircuited,
           unitsCompleted: completedNow,
+          runtimeUnitsTotal: runtimeCandidates.length,
           updatedAt: new Date(),
         })
         .where(eq(validationRuns.id, job.runId));
 
-      return survivorJobs;
+      return { survivors: survivorJobs, runtimeJobs: runtimeCandidates };
     }, db);
 
-    // Fan out survivors to the unit queue, or finalize immediately if none reach the LLM.
+    // Fan out LLM validation survivors; fan out runtime jobs in parallel (independently tracked).
+    const { survivors, runtimeJobs } = result;
     if (survivors.length > 0) {
       await enqueueUnitsFair(survivors);
     } else {
@@ -93,6 +112,9 @@ export class OrchestratorService {
         { runId: job.runId, orgId: job.orgId, elementKey: '*', trace: injectTrace() },
         { jobId: `agg:${job.runId}` },
       );
+    }
+    if (runtimeJobs.length > 0) {
+      await enqueueRuntimeJobs(runtimeJobs);
     }
   }
 
