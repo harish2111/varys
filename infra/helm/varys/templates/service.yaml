@@ -1,0 +1,15 @@
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.type "http" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: { app: {{ $name }}, part-of: varys }
+spec:
+  selector: { app: {{ $name }} }
+  ports:
+    - port: {{ $svc.port }}
+      targetPort: {{ $svc.port }}
+{{- end }}
+{{- end }}

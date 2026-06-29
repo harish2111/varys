@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+env:
+  # Integration tests connect to the service containers below.
+  DATABASE_URL: postgresql://varys_owner:varys_owner_pw@localhost:5432/varys
+  DATABASE_DIRECT_URL: postgresql://varys_owner:varys_owner_pw@localhost:5432/varys
+  REDIS_URL: redis://localhost:6379
+  JWT_SECRET: ci-test-secret-please-change
+  INTERNAL_SERVICE_SECRET: ci-internal-secret-please-change
+  NODE_ENV: test
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: varys_owner
+          POSTGRES_PASSWORD: varys_owner_pw
+          POSTGRES_DB: varys
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U varys_owner -d varys"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      # Test gate: integration tests run against the postgres+redis services above.
+      # Production deployment only proceeds when this job (incl. tests) succeeds.
+      - name: Test
+        run: pnpm test
+
+  deploy:
+    # Tests must pass before any production deployment (per engagement requirement).
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy gate
+        run: echo "build-test passed; GKE Helm deploy runs here (see infra/helm)."

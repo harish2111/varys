@@ -1,0 +1,42 @@
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.autoscale.metric "queue" }}
+---
+# KEDA scales workers on BullMQ queue depth (spec §4.3 — pods scale on queue depth; the
+# governor, not pod count, is the true throttle). The BullMQ list key is `bull:<queue>:wait`.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}-scaler
+spec:
+  scaleTargetRef:
+    name: {{ $name }}
+  minReplicaCount: {{ $svc.replicas.min }}
+  maxReplicaCount: {{ $svc.replicas.max }}
+  triggers:
+    - type: redis
+      metadata:
+        address: {{ $.Values.redis.address }}
+        listName: "bull:{{ $svc.autoscale.queue }}:wait"
+        listLength: "{{ $svc.autoscale.lagThreshold }}"
+{{- else if eq $svc.autoscale.metric "cpu" }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $name }}
+  minReplicas: {{ $svc.replicas.min }}
+  maxReplicas: {{ $svc.replicas.max }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscale.targetCPU }}
+{{- end }}
+{{- end }}
