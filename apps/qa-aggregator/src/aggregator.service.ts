@@ -1,6 +1,10 @@
 import { type AggregateJob, RunStatus, Severity } from '@varys/contracts';
-import { getDb, validationFindings, validationRuns, withOrg } from '@varys/db';
-import { eq } from 'drizzle-orm';
+import { getDb, geminiUsage, validationFindings, validationRuns, withOrg } from '@varys/db';
+import { createLogger } from '@varys/telemetry';
+import { loadConfig } from '@varys/config';
+import { sql, eq, and, gte, lt } from 'drizzle-orm';
+
+const logger = createLogger({ service: 'qa-aggregator' });
 
 /**
  * Report roll-up (spec §5.5): collects the run's findings, generates a consolidated Markdown
@@ -43,6 +47,48 @@ export class AggregatorService {
         })
         .where(eq(validationRuns.id, job.runId));
     }, db);
+
+    await this.checkCostSpike(job.orgId);
+  }
+
+  private async checkCostSpike(orgId: string): Promise<void> {
+    const db = getDb();
+    const config = loadConfig();
+    const now = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const yesterdayStart = new Date(todayStart.getTime() - 86_400_000);
+
+    try {
+      const [todayRow] = await db
+        .select({ total: sql<string>`coalesce(sum(cost_usd), 0)` })
+        .from(geminiUsage)
+        .where(and(eq(geminiUsage.orgId, orgId), gte(geminiUsage.createdAt, todayStart)));
+
+      const [yesterdayRow] = await db
+        .select({ total: sql<string>`coalesce(sum(cost_usd), 0)` })
+        .from(geminiUsage)
+        .where(
+          and(
+            eq(geminiUsage.orgId, orgId),
+            gte(geminiUsage.createdAt, yesterdayStart),
+            lt(geminiUsage.createdAt, todayStart),
+          ),
+        );
+
+      const todayCost = Number(todayRow?.total ?? 0);
+      const yesterdayCost = Number(yesterdayRow?.total ?? 0);
+      const threshold = config.COST_DAILY_ALERT_SPIKE_PCT / 100;
+
+      if (yesterdayCost > 0 && todayCost > yesterdayCost * (1 + threshold)) {
+        const pct = (((todayCost - yesterdayCost) / yesterdayCost) * 100).toFixed(1);
+        logger.warn(
+          { orgId, todayCost, yesterdayCost, spikePercent: pct, threshold: config.COST_DAILY_ALERT_SPIKE_PCT },
+          `COST_SPIKE: daily Gemini spend up ${pct}% vs yesterday (today=$${todayCost.toFixed(4)} yesterday=$${yesterdayCost.toFixed(4)})`,
+        );
+      }
+    } catch (err) {
+      logger.warn({ err }, 'cost-spike check failed; skipping');
+    }
   }
 }
 

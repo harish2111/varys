@@ -2,10 +2,11 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { loadConfig } from '@varys/config';
-import { createLogger } from '@varys/telemetry';
+import { createLogger, startTelemetry } from '@varys/telemetry';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  startTelemetry({ serviceName: 'qa-gateway' });
   const config = loadConfig();
   const logger = createLogger({ service: 'qa-gateway' });
 

@@ -34,7 +34,7 @@ export const ValidationStateAnnotation = Annotation.Root({
   // Node 1 output: generated payload
   payload: Annotation<Record<string, unknown> | undefined>(),
 
-  // Node 2 output: runtime execution
+  // Node 2 output: runtime execution (pass 1)
   capturedRequest: Annotation<unknown>(),
   capturedResponse: Annotation<unknown>(),
   runtimeError: Annotation<string | undefined>(),
@@ -44,6 +44,9 @@ export const ValidationStateAnnotation = Annotation.Root({
     reducer: (prev: string[], next: string[]) => [...prev, ...next],
     default: () => [],
   }),
+  // Pass 2 for POLLING_TRIGGER (with cursor from pass 1 in the payload)
+  pass2CapturedRequest: Annotation<unknown>(),
+  pass2CapturedResponse: Annotation<unknown>(),
 
   // Node 3 output: deterministic findings
   deterministicFindings: Annotation<Finding[]>(),

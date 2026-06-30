@@ -70,29 +70,49 @@ export async function executeRuntime(
   }
 
   const host = new MockHttpHost(mockResponder(unit, contract));
-
-  const result = await runConnectorInIsolate({
+  const runOpts = {
     code: transpiledSource,
     unitKey: unit.key,
     elementType: unit.elementType,
-    payload: state.payload ?? {},
     auth: state.credentials ?? buildDefaultAuth(unit),
     host,
     memoryMb: deps.memoryMb,
     cpuTimeoutMs: deps.cpuTimeoutMs,
-  });
+  };
 
+  const result = await runConnectorInIsolate({ ...runOpts, payload: state.payload ?? {} });
   const [capturedRequest] = host.captured;
-  logs.push(result.ok ? 'Runtime execution succeeded.' : `Runtime error: ${result.error ?? 'unknown'}`);
+  logs.push(result.ok ? 'Pass 1 succeeded.' : `Pass 1 error: ${result.error ?? 'unknown'}`);
 
-  return {
+  const base: Partial<ValidationState> = {
     capturedRequest: capturedRequest ?? null,
     capturedResponse: result.returnValue ?? null,
     runtimeError: result.ok ? undefined : (result.error ?? 'unknown runtime error'),
     runtimeOom: result.oom ?? false,
     runtimeTimeout: result.timeout ?? false,
-    runtimeLogs: logs,
+    pass2CapturedRequest: null,
+    pass2CapturedResponse: null,
   };
+
+  // Two-pass polling: run a second isolate pass with the cursor from pass 1.
+  if (result.ok && unit.elementType === ElementType.POLLING_TRIGGER) {
+    const pass1Resp = result.returnValue as Record<string, unknown> | undefined;
+    const cursor = pass1Resp?.cursor;
+    const hasPass1Records = Array.isArray(pass1Resp?.records) && (pass1Resp!.records as unknown[]).length > 0;
+    if (cursor !== undefined && cursor !== null && hasPass1Records) {
+      const host2 = new MockHttpHost(mockResponder(unit, contract));
+      const result2 = await runConnectorInIsolate({
+        ...runOpts,
+        host: host2,
+        payload: { ...(state.payload ?? {}), cursor },
+      });
+      logs.push(result2.ok ? 'Pass 2 succeeded.' : `Pass 2 error: ${result2.error ?? 'unknown'}`);
+      base.pass2CapturedRequest = host2.captured[0] ?? null;
+      base.pass2CapturedResponse = result2.returnValue ?? null;
+    }
+  }
+
+  return { ...base, runtimeLogs: logs };
 }
 
 /**
@@ -127,11 +147,18 @@ export async function deterministicValidation(
 
   // Two-pass polling verification for POLLING_TRIGGER elements.
   if (unit.elementType === ElementType.POLLING_TRIGGER && state.capturedResponse) {
-    const resp = state.capturedResponse as Record<string, unknown>;
-    const records = Array.isArray(resp.records) ? resp.records as Array<Record<string, unknown>> : [];
-    const pass1 = { records, cursor: resp.cursor, hasMore: resp.hasMore as boolean | undefined };
-    // Pass 2 simulates a replay with the cursor; we use the same single-run result here.
-    const pass2 = { records: [], cursor: pass1.cursor };
+    const resp1 = state.capturedResponse as Record<string, unknown>;
+    const pass1 = {
+      records: Array.isArray(resp1.records) ? (resp1.records as Array<Record<string, unknown>>) : [],
+      cursor: resp1.cursor,
+      hasMore: resp1.hasMore as boolean | undefined,
+    };
+    // If a pass2 was executed, use its actual result; otherwise supply empty records.
+    const resp2 = state.pass2CapturedResponse as Record<string, unknown> | null;
+    const pass2 = {
+      records: resp2 && Array.isArray(resp2.records) ? (resp2.records as Array<Record<string, unknown>>) : [],
+      cursor: resp2?.cursor ?? pass1.cursor,
+    };
     findings.push(...verifyPolling(pass1, pass2));
   }
 
