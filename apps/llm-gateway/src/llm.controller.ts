@@ -1,5 +1,5 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
-import type { RuntimeFailureAnalysisRequest, ValidateUnitRequest } from '@varys/llm-client';
+import type { ConnectorRepairRequest, RuntimeFailureAnalysisRequest, ValidateUnitRequest } from '@varys/llm-client';
 import { InternalGuard } from './internal.guard';
 import { LlmService } from './llm.service';
 
@@ -21,5 +21,10 @@ export class LlmController {
   @Post('analyze-failure')
   analyzeFailure(@Body() body: RuntimeFailureAnalysisRequest) {
     return this.llm.analyzeFailure(body);
+  }
+
+  @Post('repair')
+  repair(@Body() body: ConnectorRepairRequest) {
+    return this.llm.repair(body);
   }
 }

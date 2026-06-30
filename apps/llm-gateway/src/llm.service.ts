@@ -3,6 +3,8 @@ import { geminiUsage, getDb, withOrg, withoutOrg } from '@varys/db';
 import {
   GeminiTransport,
   LlmClient,
+  type ConnectorRepairRequest,
+  type ConnectorRepairResponse,
   type PricingTable,
   type RuntimeFailureAnalysisRequest,
   type RuntimeFailureAnalysisResponse,
@@ -94,6 +96,19 @@ export class LlmService implements OnModuleInit {
     }
   }
 
+  async repair(req: ConnectorRepairRequest): Promise<ConnectorRepairResponse> {
+    const model = this.config.GEMINI_MODEL_FLASH;
+    const prompt = buildRepairPrompt(req);
+    await this.governor.acquire('flash', estimateTokens(prompt));
+    const raw = await this.client.generateText(prompt, { model, responseSchema: REPAIR_SCHEMA });
+    await this.meter(req.orgId, req.runId, model, 'validation', raw.usage, raw.costUsd);
+    try {
+      return JSON.parse(raw.text) as ConnectorRepairResponse;
+    } catch {
+      return { patch: '', explanation: raw.text, confidence: 0.5 };
+    }
+  }
+
   private async meter(
     orgId: string,
     runId: string | undefined,
@@ -138,6 +153,31 @@ const FAILURE_ANALYSIS_SCHEMA: Record<string, unknown> = {
   },
   required: ['analysis', 'isRetryable'],
 };
+
+const REPAIR_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    patch: { type: 'string' },
+    explanation: { type: 'string' },
+    confidence: { type: 'number' },
+  },
+  required: ['patch', 'explanation', 'confidence'],
+};
+
+function buildRepairPrompt(req: ConnectorRepairRequest): string {
+  return JSON.stringify({
+    instruction: [
+      'You are an expert iPaaS connector developer.',
+      'A validation finding was raised for the connector element below.',
+      'Produce a minimal, focused patch (unified diff format preferred) that fixes the finding.',
+      'Also provide a clear explanation and a 0–1 confidence score.',
+      'Output strictly the JSON matching the provided schema.',
+    ].join(' '),
+    element: { name: req.elementName, type: req.elementType },
+    finding: req.finding,
+    source: req.source,
+  });
+}
 
 function buildFailureAnalysisPrompt(req: RuntimeFailureAnalysisRequest): string {
   return JSON.stringify({

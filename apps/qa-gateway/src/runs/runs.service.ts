@@ -1,12 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Severity, type RunStatusResponse } from '@varys/contracts';
 import { getDb, validationFindings, validationRuns, withOrg } from '@varys/db';
+import { type ConnectorRepairRequest, LlmGatewayClient } from '@varys/llm-client';
 import { getAppQueue } from '@varys/queue';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, and } from 'drizzle-orm';
 import type { Principal } from '../auth/principal';
 
 @Injectable()
 export class RunsService {
+  private get gateway(): LlmGatewayClient {
+    const { LLM_GATEWAY_PORT, INTERNAL_SERVICE_SECRET } = process.env as Record<string, string>;
+    const url = process.env.LLM_GATEWAY_URL ?? `http://localhost:${LLM_GATEWAY_PORT ?? 3001}`;
+    return new LlmGatewayClient(url, INTERNAL_SERVICE_SECRET ?? '');
+  }
+
   async getStatus(principal: Principal, runId: string): Promise<RunStatusResponse> {
     const db = getDb();
     const run = await withOrg(principal.orgId, async (tx) => {
@@ -96,6 +103,88 @@ export class RunsService {
         unitsCompleted: r.unitsCompleted,
         createdAt: r.createdAt.toISOString(),
       }));
+    }, db);
+  }
+
+  /**
+   * POST /v1/runs/:runId/findings/:findingId/repair
+   * Calls the LLM gateway to suggest a minimal code patch for the finding.
+   * The caller must supply the connector source — it is never stored at rest.
+   */
+  async repairFinding(
+    principal: Principal,
+    runId: string,
+    findingId: string,
+    source: string,
+  ) {
+    const db = getDb();
+    const finding = await withOrg(principal.orgId, async (tx) => {
+      const [f] = await tx
+        .select()
+        .from(validationFindings)
+        .where(and(eq(validationFindings.id, findingId), eq(validationFindings.runId, runId)))
+        .limit(1);
+      return f;
+    }, db);
+
+    if (!finding) throw new NotFoundException('Finding not found');
+
+    const req: ConnectorRepairRequest = {
+      orgId: principal.orgId,
+      runId,
+      elementName: finding.ruleId,
+      elementType: 'ACTION',
+      source,
+      finding: {
+        ruleId: finding.ruleId,
+        message: finding.message,
+        targetPath: finding.targetPath,
+        category: finding.category,
+      },
+    };
+    return this.gateway.repair(req);
+  }
+
+  /**
+   * PATCH /v1/runs/:runId/findings/:findingId/review
+   * Records a HITL decision (APPROVED / REJECTED) for a finding flagged for human review.
+   */
+  async reviewFinding(
+    principal: Principal,
+    runId: string,
+    findingId: string,
+    decision: 'APPROVED' | 'REJECTED',
+    note?: string,
+  ) {
+    if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+      throw new BadRequestException('decision must be APPROVED or REJECTED');
+    }
+    const db = getDb();
+    return withOrg(principal.orgId, async (tx) => {
+      const [existing] = await tx
+        .select({ id: validationFindings.id, hitl: validationFindings.hitl })
+        .from(validationFindings)
+        .where(and(eq(validationFindings.id, findingId), eq(validationFindings.runId, runId)))
+        .limit(1);
+
+      if (!existing) throw new NotFoundException('Finding not found');
+
+      const [updated] = await tx
+        .update(validationFindings)
+        .set({
+          hitlStatus: decision,
+          details: note ? { reviewNote: note } : undefined,
+        })
+        .where(eq(validationFindings.id, findingId))
+        .returning({
+          id: validationFindings.id,
+          ruleId: validationFindings.ruleId,
+          severity: validationFindings.severity,
+          hitl: validationFindings.hitl,
+          hitlStatus: validationFindings.hitlStatus,
+        });
+
+      return updated;
     }, db);
   }
 }

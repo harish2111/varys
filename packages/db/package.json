@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && cp -r src/migrations dist/migrations",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"(no unit tests)\"",
+    "test": "jest --passWithNoTests --forceExit",
     "lint": "eslint src --max-warnings 0",
     "migrate": "node dist/migrate.js",
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
@@ -18,7 +18,10 @@
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/pg": "^8.11.10",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "typescript": "5.6.3"
   }
 }
