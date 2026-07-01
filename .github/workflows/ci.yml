@@ -14,6 +14,9 @@ env:
   JWT_SECRET: ci-test-secret-please-change
   INTERNAL_SERVICE_SECRET: ci-internal-secret-please-change
   NODE_ENV: test
+  # Stub values required by @varys/config at test bootstrap (not real API keys).
+  GEMINI_API_KEY: ci-stub
+  LLM_GATEWAY_URL: http://localhost:3001
 
 jobs:
   build-test:
@@ -56,17 +59,91 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # Test gate: integration tests run against the postgres+redis services above.
+      # Test gate: unit + integration tests run against the postgres+redis services above.
       # Production deployment only proceeds when this job (incl. tests) succeeds.
       - name: Test
         run: pnpm test
 
-  deploy:
-    # Tests must pass before any production deployment (per engagement requirement).
+  docker-build:
+    # Verify all service images build cleanly; no push (push happens in deploy).
     needs: build-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - qa-gateway
+          - llm-gateway
+          - qa-orchestrator
+          - qa-unit-worker
+          - qa-sandbox-worker
+          - qa-aggregator
+          - doc-ingestor
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy gate
-        run: echo "build-test passed; GKE Helm deploy runs here (see infra/helm)."
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: SERVICE=${{ matrix.service }}
+          tags: varys/${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    # Tests + Docker builds must pass before any production deployment.
+    needs: [build-test, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Workload Identity Federation for GCP auth
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push all service images
+        env:
+          REGISTRY: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/varys
+          TAG: ${{ github.sha }}
+        run: |
+          for svc in qa-gateway llm-gateway qa-orchestrator qa-unit-worker qa-sandbox-worker qa-aggregator doc-ingestor; do
+            docker build --build-arg SERVICE=$svc -t $REGISTRY/$svc:$TAG -t $REGISTRY/$svc:latest .
+            docker push $REGISTRY/$svc:$TAG
+            docker push $REGISTRY/$svc:latest
+          done
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.GKE_CLUSTER }}
+          location: ${{ secrets.GCP_REGION }}
+
+      - name: Helm upgrade
+        env:
+          REGISTRY: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/varys
+          TAG: ${{ github.sha }}
+        run: |
+          helm upgrade --install varys infra/helm/varys \
+            --set image.registry=$REGISTRY \
+            --set image.tag=$TAG \
+            --atomic --timeout 10m \
+            --namespace varys --create-namespace
