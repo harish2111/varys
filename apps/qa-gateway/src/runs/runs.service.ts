@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Severity, type RunStatusResponse } from '@varys/contracts';
+import { loadConfig } from '@varys/config';
 import { getDb, validationFindings, validationRuns, withOrg } from '@varys/db';
 import { type ConnectorRepairRequest, LlmGatewayClient } from '@varys/llm-client';
 import { getAppQueue } from '@varys/queue';
@@ -9,9 +10,9 @@ import type { Principal } from '../auth/principal';
 @Injectable()
 export class RunsService {
   private get gateway(): LlmGatewayClient {
-    const { LLM_GATEWAY_PORT, INTERNAL_SERVICE_SECRET } = process.env as Record<string, string>;
-    const url = process.env.LLM_GATEWAY_URL ?? `http://localhost:${LLM_GATEWAY_PORT ?? 3001}`;
-    return new LlmGatewayClient(url, INTERNAL_SERVICE_SECRET ?? '');
+    const config = loadConfig();
+    const url = config.LLM_GATEWAY_URL ?? `http://localhost:${config.LLM_GATEWAY_PORT}`;
+    return new LlmGatewayClient(url, config.INTERNAL_SERVICE_SECRET);
   }
 
   async getStatus(principal: Principal, runId: string): Promise<RunStatusResponse> {
@@ -38,6 +39,21 @@ export class RunsService {
       createdAt: run.createdAt.toISOString(),
       updatedAt: run.updatedAt.toISOString(),
     };
+  }
+
+  /** Serve the pre-generated consolidated Markdown report blob. */
+  async getReportMarkdown(principal: Principal, runId: string): Promise<string> {
+    const db = getDb();
+    const run = await withOrg(principal.orgId, async (tx) => {
+      const [r] = await tx
+        .select({ reportMd: validationRuns.reportMd })
+        .from(validationRuns)
+        .where(eq(validationRuns.id, runId))
+        .limit(1);
+      return r;
+    }, db);
+    if (!run) throw new NotFoundException('Run not found');
+    return run.reportMd ?? '*(report not yet generated)*';
   }
 
   /** Full report: run summary + findings grouped by severity, with element names. */
@@ -81,6 +97,7 @@ export class RunsService {
         },
         summary,
         findings,
+        reportMd: run.reportMd ?? null,
         createdAt: run.createdAt.toISOString(),
         completedAt: run.completedAt?.toISOString() ?? null,
       };
