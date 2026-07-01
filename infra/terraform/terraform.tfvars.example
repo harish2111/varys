@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in your values.
+# Never commit terraform.tfvars — it is git-ignored.
+
+project_id = "my-gcp-project"
+region     = "us-central1"
+github_org = "my-github-org"
+github_repo = "varys"
+
+# Scale these up for production:
+# db_tier              = "db-n1-standard-2"
+# db_availability_type = "REGIONAL"
+# redis_tier           = "STANDARD_HA"
+# redis_memory_size_gb = 4
+# default_pool_min_nodes = 2
+# sandbox_pool_min_nodes = 2
