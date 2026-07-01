@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { loadConfig } from '@varys/config';
-import { createLogger } from '@varys/telemetry';
+import { createLogger, startTelemetry } from '@varys/telemetry';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  startTelemetry({ serviceName: 'qa-orchestrator' });
   loadConfig();
   const logger = createLogger({ service: 'qa-orchestrator' });
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });

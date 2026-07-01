@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentPrincipal, type Principal } from '../auth/principal';
 import { RunsService } from './runs.service';
@@ -21,5 +21,28 @@ export class RunsController {
   @Get(':id/report')
   report(@CurrentPrincipal() principal: Principal, @Param('id') id: string) {
     return this.runs.getReport(principal, id);
+  }
+
+  /** POST /v1/runs/:runId/findings/:findingId/repair — generate a patch suggestion for a finding. */
+  @Post(':runId/findings/:findingId/repair')
+  repairFinding(
+    @CurrentPrincipal() principal: Principal,
+    @Param('runId') runId: string,
+    @Param('findingId') findingId: string,
+    @Body('source') source: string,
+  ) {
+    return this.runs.repairFinding(principal, runId, findingId, source);
+  }
+
+  /** PATCH /v1/runs/:runId/findings/:findingId/review — record HITL approve/reject decision. */
+  @Patch(':runId/findings/:findingId/review')
+  reviewFinding(
+    @CurrentPrincipal() principal: Principal,
+    @Param('runId') runId: string,
+    @Param('findingId') findingId: string,
+    @Body('decision') decision: 'APPROVED' | 'REJECTED',
+    @Body('note') note?: string,
+  ) {
+    return this.runs.reviewFinding(principal, runId, findingId, decision, note);
   }
 }

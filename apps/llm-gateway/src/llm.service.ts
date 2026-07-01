@@ -3,7 +3,11 @@ import { geminiUsage, getDb, withOrg, withoutOrg } from '@varys/db';
 import {
   GeminiTransport,
   LlmClient,
+  type ConnectorRepairRequest,
+  type ConnectorRepairResponse,
   type PricingTable,
+  type RuntimeFailureAnalysisRequest,
+  type RuntimeFailureAnalysisResponse,
   type ValidateUnitRequest,
   type ValidateUnitResponse,
   buildUnitValidationContents,
@@ -73,6 +77,38 @@ export class LlmService implements OnModuleInit {
     return { embedding: result.embedding };
   }
 
+  async analyzeFailure(req: RuntimeFailureAnalysisRequest): Promise<RuntimeFailureAnalysisResponse> {
+    const model = this.config.GEMINI_MODEL_FLASH;
+    const prompt = buildFailureAnalysisPrompt(req);
+    await this.governor.acquire('flash', estimateTokens(prompt));
+
+    const raw = await this.client.generateText(prompt, {
+      model,
+      responseSchema: FAILURE_ANALYSIS_SCHEMA,
+    });
+    await this.meter(req.orgId, req.runId, model, 'validation', raw.usage, raw.costUsd);
+
+    try {
+      const parsed = JSON.parse(raw.text) as RuntimeFailureAnalysisResponse;
+      return parsed;
+    } catch {
+      return { analysis: raw.text, isRetryable: false };
+    }
+  }
+
+  async repair(req: ConnectorRepairRequest): Promise<ConnectorRepairResponse> {
+    const model = this.config.GEMINI_MODEL_FLASH;
+    const prompt = buildRepairPrompt(req);
+    await this.governor.acquire('flash', estimateTokens(prompt));
+    const raw = await this.client.generateText(prompt, { model, responseSchema: REPAIR_SCHEMA });
+    await this.meter(req.orgId, req.runId, model, 'validation', raw.usage, raw.costUsd);
+    try {
+      return JSON.parse(raw.text) as ConnectorRepairResponse;
+    } catch {
+      return { patch: '', explanation: raw.text, confidence: 0.5 };
+    }
+  }
+
   private async meter(
     orgId: string,
     runId: string | undefined,
@@ -105,4 +141,55 @@ function modelClass(model: string): ModelClass {
   if (/pro/i.test(model)) return 'pro';
   if (/embedding/i.test(model)) return 'embed';
   return 'flash';
+}
+
+const FAILURE_ANALYSIS_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    analysis: { type: 'string' },
+    rootCause: { type: 'string' },
+    suggestedFix: { type: 'string' },
+    isRetryable: { type: 'boolean' },
+  },
+  required: ['analysis', 'isRetryable'],
+};
+
+const REPAIR_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    patch: { type: 'string' },
+    explanation: { type: 'string' },
+    confidence: { type: 'number' },
+  },
+  required: ['patch', 'explanation', 'confidence'],
+};
+
+function buildRepairPrompt(req: ConnectorRepairRequest): string {
+  return JSON.stringify({
+    instruction: [
+      'You are an expert iPaaS connector developer.',
+      'A validation finding was raised for the connector element below.',
+      'Produce a minimal, focused patch (unified diff format preferred) that fixes the finding.',
+      'Also provide a clear explanation and a 0–1 confidence score.',
+      'Output strictly the JSON matching the provided schema.',
+    ].join(' '),
+    element: { name: req.elementName, type: req.elementType },
+    finding: req.finding,
+    source: req.source,
+  });
+}
+
+function buildFailureAnalysisPrompt(req: RuntimeFailureAnalysisRequest): string {
+  return JSON.stringify({
+    instruction: [
+      'You are analyzing a runtime test failure for an iPaaS connector.',
+      'Given the element name, type, any runtime error, and the captured HTTP request,',
+      'diagnose the root cause and determine if regenerating the test payload would fix it.',
+      'Output strictly the JSON matching the provided schema.',
+    ].join(' '),
+    element: { name: req.elementName, type: req.elementType },
+    runtimeError: req.runtimeError ?? null,
+    capturedRequest: req.capturedRequest ?? null,
+    findingSummary: req.findingSummary ?? null,
+  });
 }

@@ -1,10 +1,11 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { loadConfig } from '@varys/config';
-import { createLogger } from '@varys/telemetry';
+import { createLogger, startTelemetry } from '@varys/telemetry';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  startTelemetry({ serviceName: 'llm-gateway' });
   const config = loadConfig();
   const logger = createLogger({ service: 'llm-gateway' });
   const app = await NestFactory.create(AppModule, { logger: false });

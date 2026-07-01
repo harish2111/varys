@@ -80,6 +80,24 @@ export class LlmClient {
     };
   }
 
+  async generateText(
+    prompt: string,
+    opts: { model: string; responseSchema?: Record<string, unknown> },
+  ): Promise<{ text: string; usage: TokenUsage; costUsd: number }> {
+    const res = await this.transport.generate({
+      model: opts.model,
+      contents: prompt,
+      responseMimeType: opts.responseSchema ? 'application/json' : 'text/plain',
+      responseSchema: opts.responseSchema,
+      temperature: 0,
+    });
+    return {
+      text: res.text,
+      usage: res.usage,
+      costUsd: computeGenerateCost(pricingForModel(this.pricing, opts.model), res.usage),
+    };
+  }
+
   async rerank(
     query: string,
     chunks: { id: number; text: string }[],

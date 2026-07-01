@@ -22,6 +22,46 @@ export interface EmbedResponseDto {
   embedding: number[];
 }
 
+export interface RuntimeFailureAnalysisRequest {
+  runId?: string;
+  orgId: string;
+  elementName: string;
+  elementType: 'ACTION' | 'TRIGGER';
+  runtimeError?: string;
+  capturedRequest?: unknown;
+  findingSummary?: string;
+}
+
+export interface RuntimeFailureAnalysisResponse {
+  analysis: string;
+  rootCause?: string;
+  suggestedFix?: string;
+  isRetryable: boolean;
+}
+
+export interface ConnectorRepairRequest {
+  orgId: string;
+  runId?: string;
+  elementName: string;
+  elementType: 'ACTION' | 'TRIGGER';
+  /** Full connector source (stripped of comments before sending). */
+  source: string;
+  finding: {
+    ruleId: string;
+    message: string;
+    targetPath?: string | null;
+    category: string;
+  };
+}
+
+export interface ConnectorRepairResponse {
+  /** Unified diff or minimal code snippet showing the fix. */
+  patch: string;
+  explanation: string;
+  /** 0–1 confidence that the patch is correct. */
+  confidence: number;
+}
+
 /**
  * HTTP client used by workers to reach the llm-gateway — the sole Gemini conduit. Workers
  * never hold the Gemini key; the gateway governs rate, routes models, and meters cost.
@@ -38,6 +78,14 @@ export class LlmGatewayClient {
 
   async embed(text: string, runId?: string, orgId?: string): Promise<EmbedResponseDto> {
     return this.post<EmbedResponseDto>('/v1/llm/embed', { text, runId, orgId });
+  }
+
+  async analyzeFailure(req: RuntimeFailureAnalysisRequest): Promise<RuntimeFailureAnalysisResponse> {
+    return this.post<RuntimeFailureAnalysisResponse>('/v1/llm/analyze-failure', req);
+  }
+
+  async repair(req: ConnectorRepairRequest): Promise<ConnectorRepairResponse> {
+    return this.post<ConnectorRepairResponse>('/v1/llm/repair', req);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
