@@ -9,7 +9,7 @@ import {
 } from '@varys/contracts';
 import type { LlmGatewayClient } from '@varys/llm-client';
 import { buildMockPayload } from '../payload';
-import { MockHttpHost, mockResponder } from '../host-http';
+import { LiveHttpHost, MockHttpHost, mockResponder } from '../host-http';
 import { diffRequestAgainstContract } from '../contract-diff';
 import { verifyPolling } from '../polling';
 import { runConnectorInIsolate } from '../isolate';
@@ -21,6 +21,10 @@ export interface NodeDeps {
   gatewayUrl: string;
   cpuTimeoutMs: number;
   memoryMb: number;
+  /** When true, routes the isolate's fetch through Squid (live connector test). */
+  live?: boolean;
+  egressProxyUrl?: string;
+  wallTimeoutMs?: number;
 }
 
 /**
@@ -69,7 +73,10 @@ export async function executeRuntime(
     };
   }
 
-  const host = new MockHttpHost(mockResponder(unit, contract));
+  const host =
+    deps.live && deps.egressProxyUrl
+      ? new LiveHttpHost(deps.egressProxyUrl, deps.wallTimeoutMs ?? 10_000)
+      : new MockHttpHost(mockResponder(unit, contract));
   const runOpts = {
     code: transpiledSource,
     unitKey: unit.key,
@@ -100,7 +107,10 @@ export async function executeRuntime(
     const cursor = pass1Resp?.cursor;
     const hasPass1Records = Array.isArray(pass1Resp?.records) && (pass1Resp!.records as unknown[]).length > 0;
     if (cursor !== undefined && cursor !== null && hasPass1Records) {
-      const host2 = new MockHttpHost(mockResponder(unit, contract));
+      const host2 =
+        deps.live && deps.egressProxyUrl
+          ? new LiveHttpHost(deps.egressProxyUrl, deps.wallTimeoutMs ?? 10_000)
+          : new MockHttpHost(mockResponder(unit, contract));
       const result2 = await runConnectorInIsolate({
         ...runOpts,
         host: host2,

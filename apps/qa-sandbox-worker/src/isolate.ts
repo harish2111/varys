@@ -1,4 +1,4 @@
-import type { MockHttpHost } from './host-http';
+import type { HttpHost } from './host-http';
 
 export interface IsolateOptions {
   /** Transpiled connector CommonJS. */
@@ -7,7 +7,7 @@ export interface IsolateOptions {
   elementType: string;
   payload: Record<string, unknown>;
   auth: Record<string, unknown>;
-  host: MockHttpHost;
+  host: HttpHost;
   memoryMb: number;
   cpuTimeoutMs: number;
 }

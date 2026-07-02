@@ -24,13 +24,12 @@ export class SandboxService {
   private readonly graph: ReturnType<typeof buildValidationGraph>;
 
   constructor(private readonly config: AppConfig) {
-    this.gateway = new LlmGatewayClient(
-      `http://localhost:${config.LLM_GATEWAY_PORT}`,
-      config.INTERNAL_SERVICE_SECRET,
-    );
+    const gatewayUrl = config.LLM_GATEWAY_URL ?? `http://localhost:${config.LLM_GATEWAY_PORT}`;
+    this.gateway = new LlmGatewayClient(gatewayUrl, config.INTERNAL_SERVICE_SECRET);
+    // Default graph is mock-mode; live jobs override deps per-call in process().
     this.graph = buildValidationGraph({
       gateway: this.gateway,
-      gatewayUrl: `http://localhost:${config.LLM_GATEWAY_PORT}`,
+      gatewayUrl,
       cpuTimeoutMs: config.SANDBOX_CPU_TIMEOUT_MS ?? 2000,
       memoryMb: config.SANDBOX_MEMORY_MB ?? 128,
     });
@@ -39,6 +38,20 @@ export class SandboxService {
   async process(job: RuntimeJob): Promise<void> {
     const unit = job.unit;
     const elementType = unit.elementType === ElementType.ACTION ? 'ACTION' : 'TRIGGER';
+
+    // For live jobs, rebuild the graph with egress deps so executeRuntime uses LiveHttpHost.
+    const graph =
+      job.live && this.config.EGRESS_PROXY_URL
+        ? buildValidationGraph({
+            gateway: this.gateway,
+            gatewayUrl: this.config.LLM_GATEWAY_URL ?? `http://localhost:${this.config.LLM_GATEWAY_PORT}`,
+            cpuTimeoutMs: this.config.SANDBOX_CPU_TIMEOUT_MS ?? 2000,
+            memoryMb: this.config.SANDBOX_MEMORY_MB ?? 128,
+            live: true,
+            egressProxyUrl: this.config.EGRESS_PROXY_URL,
+            wallTimeoutMs: this.config.SANDBOX_WALL_TIMEOUT_MS ?? 10_000,
+          })
+        : this.graph;
 
     const initialState: Partial<ValidationState> = {
       runId: job.runId,
@@ -66,7 +79,7 @@ export class SandboxService {
 
     let finalState: ValidationState;
     try {
-      finalState = (await this.graph.invoke(initialState)) as ValidationState;
+      finalState = (await graph.invoke(initialState)) as ValidationState;
     } catch (err) {
       finalState = {
         ...(initialState as ValidationState),

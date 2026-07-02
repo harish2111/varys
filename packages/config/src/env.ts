@@ -108,6 +108,9 @@ export const envSchema = z.object({
   // Ports
   GATEWAY_PORT: int(3000),
   LLM_GATEWAY_PORT: int(3001),
+
+  // Internal service URLs (override port-based defaults for multi-host deployments)
+  LLM_GATEWAY_URL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
